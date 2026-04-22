@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JogAir - Clean Air Route Planner</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; height: 100vh; display: flex; flex-direction: column; }
+        #header {
+            background: #2c7a4b;
+            color: white;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        #header h1 { font-size: 1.4rem; }
+        #controls {
+            background: #f5f5f5;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+            border-bottom: 1px solid #ddd;
+        }
+        .instruction { font-size: 0.9rem; color: #555; }
+        #btn-find {
+            background: #2c7a4b;
+            color: white;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.95rem;
+        }
+        #btn-find:hover { background: #235f3a; }
+        #btn-clear {
+            background: #888;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.95rem;
+        }
+        #map { flex: 1; }
+        #info-panel {
+            background: white;
+            padding: 12px 20px;
+            border-top: 1px solid #ddd;
+            display: flex;
+            gap: 32px;
+            flex-wrap: wrap;
+            font-size: 0.9rem;
+        }
+        .info-item { display: flex; flex-direction: column; gap: 2px; }
+        .info-label { color: #888; font-size: 0.8rem; }
+        .info-value { font-weight: bold; color: #333; }
+        .shortest-color { color: #3388ff; }
+        .clean-color { color: #2c7a4b; }
+        #status { font-size: 0.85rem; color: #888; font-style: italic; }
+    </style>
+</head>
+<body>
+
+<div id="header">
+    <h1>🌿 JogAir — Clean Air Route Planner</h1>
+    <span style="font-size:0.85rem; opacity:0.8;">Aarhus, Denmark</span>
+</div>
+
+<div id="controls">
+    <span class="instruction">1. Click map to set <b>start</b> (green) &nbsp; 2. Click again to set <b>end</b> (red) &nbsp; 3. Press Find Routes</span>
+    <button id="btn-find" onclick="findRoutes()">Find Routes</button>
+    <button id="btn-clear" onclick="clearAll()">Clear</button>
+    <span id="status">Click the map to set your start point.</span>
+</div>
+
+<div id="map"></div>
+
+<div id="info-panel">
+    <div class="info-item">
+        <span class="info-label">Shortest Route</span>
+        <span class="info-value shortest-color" id="shortest-dist">—</span>
+    </div>
+    <div class="info-item">
+        <span class="info-label">Clean Air Route</span>
+        <span class="info-value clean-color" id="clean-dist">—</span>
+    </div>
+    <div class="info-item">
+        <span class="info-label">Extra Distance</span>
+        <span class="info-value" id="extra-dist">—</span>
+    </div>
+    <div class="info-item">
+        <span class="info-label">PM2.5 Pollution</span>
+        <span class="info-value" id="pollution">—</span>
+    </div>
+</div>
+
+<script>
+    const API = "http://127.0.0.1:8000";
+
+    // Initialize map centered on Aarhus
+    const map = L.map('map').setView([56.1629, 10.2039], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    let startMarker = null;
+    let endMarker = null;
+    let shortestLayer = null;
+    let cleanLayer = null;
+    let clickState = "start";
+
+    const greenIcon = L.icon({
+        iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png',
+        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+        iconSize: [25, 41], iconAnchor: [12, 41]
+    });
+
+    const redIcon = L.icon({
+        iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png',
+        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+        iconSize: [25, 41], iconAnchor: [12, 41]
+    });
+
+    map.on('click', function(e) {
+        if (clickState === "start") {
+            if (startMarker) map.removeLayer(startMarker);
+            startMarker = L.marker(e.latlng, {icon: greenIcon})
+                .addTo(map)
+                .bindPopup("Start").openPopup();
+            clickState = "end";
+            setStatus("Start set! Now click to set your end point.");
+        } else if (clickState === "end") {
+            if (endMarker) map.removeLayer(endMarker);
+            endMarker = L.marker(e.latlng, {icon: redIcon})
+                .addTo(map)
+                .bindPopup("End").openPopup();
+            clickState = "done";
+            setStatus("End set! Press Find Routes to calculate.");
+        }
+    });
+
+    async function findRoutes() {
+        if (!startMarker || !endMarker) {
+            setStatus("Please set both start and end points first.");
+            return;
+        }
+
+        setStatus("Calculating routes...");
+
+        const s = startMarker.getLatLng();
+        const e = endMarker.getLatLng();
+
+        try {
+            const response = await fetch(`${API}/routes`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({
+                    start_lat: s.lat,
+                    start_lon: s.lng,
+                    end_lat: e.lat,
+                    end_lon: e.lng
+                })
+            });
+
+            if (!response.ok) throw new Error("API error");
+
+            const data = await response.json();
+
+            // Remove old routes
+            if (shortestLayer) map.removeLayer(shortestLayer);
+            if (cleanLayer) map.removeLayer(cleanLayer);
+
+            // Draw shortest route in blue
+            shortestLayer = L.polyline(data.shortest.coordinates, {
+                color: '#3388ff',
+                weight: 5,
+                opacity: 0.8
+            }).addTo(map).bindPopup(`Shortest: ${Math.round(data.shortest.distance_m)}m`);
+
+            // Draw clean air route in green
+            cleanLayer = L.polyline(data.clean_air.coordinates, {
+                color: '#2c7a4b',
+                weight: 5,
+                opacity: 0.8,
+                dashArray: '8, 6'
+            }).addTo(map).bindPopup(`Clean Air: ${Math.round(data.clean_air.distance_m)}m`);
+
+            // Update info panel
+            document.getElementById('shortest-dist').textContent = `${Math.round(data.shortest.distance_m)}m`;
+            document.getElementById('clean-dist').textContent = `${Math.round(data.clean_air.distance_m)}m`;
+            const diff = Math.round(data.clean_air.distance_m - data.shortest.distance_m);
+            const pct = ((diff / data.shortest.distance_m) * 100).toFixed(1);
+            document.getElementById('extra-dist').textContent = `+${diff}m (+${pct}%)`;
+            document.getElementById('pollution').textContent = `${data.pollution_value.toFixed(1)} ${data.pollution_unit}`;
+
+            setStatus("Routes calculated! Blue = shortest, green dashed = clean air.");
+
+        } catch (err) {
+            setStatus("Error calculating routes. Is the API running?");
+            console.error(err);
+        }
+    }
+
+    function clearAll() {
+        if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+        if (endMarker) { map.removeLayer(endMarker); endMarker = null; }
+        if (shortestLayer) { map.removeLayer(shortestLayer); shortestLayer = null; }
+        if (cleanLayer) { map.removeLayer(cleanLayer); cleanLayer = null; }
+        clickState = "start";
+        document.getElementById('shortest-dist').textContent = '—';
+        document.getElementById('clean-dist').textContent = '—';
+        document.getElementById('extra-dist').textContent = '—';
+        document.getElementById('pollution').textContent = '—';
+        setStatus("Click the map to set your start point.");
+    }
+
+    function setStatus(msg) {
+        document.getElementById('status').textContent = msg;
+    }
+</script>
+
+</body>
+</html>
