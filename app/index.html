@@ -74,6 +74,7 @@
 
 <div id="controls">
     <span class="instruction">1. Click map to set <b>start</b> (green) &nbsp; 2. Click again to set <b>end</b> (red) &nbsp; 3. Press Find Routes</span>
+    <input type="datetime-local" id="time-picker">
     <button id="btn-find" onclick="findRoutes()">Find Routes</button>
     <button id="btn-clear" onclick="clearAll()">Clear</button>
     <span id="status">Click the map to set your start point.</span>
@@ -98,10 +99,17 @@
         <span class="info-label">PM2.5 Pollution</span>
         <span class="info-value" id="pollution">—</span>
     </div>
+    <div class="info-item">
+        <span class="info-label">Exposure Difference</span>
+        <span class="info-value" id="exposure-diff">—</span>
+    </div>
 </div>
 
 <script>
     const API = "http://127.0.0.1:8000";
+
+    // Set default time picker to current local date and time
+    document.getElementById('time-picker').value = new Date().toISOString().slice(0, 16);
 
     // Initialize map centered on Aarhus
     const map = L.map('map').setView([56.1629, 10.2039], 13);
@@ -153,6 +161,12 @@
         const s = startMarker.getLatLng();
         const e = endMarker.getLatLng();
 
+        // Get time picker value
+        let timeValue = document.getElementById('time-picker').value;
+        if (timeValue && !timeValue.includes(':00')) {
+            timeValue += ':00';
+        }
+
         try {
             const response = await fetch(`${API}/routes`, {
                 method: "POST",
@@ -161,7 +175,8 @@
                     start_lat: s.lat,
                     start_lon: s.lng,
                     end_lat: e.lat,
-                    end_lon: e.lng
+                    end_lon: e.lng,
+                    request_time: timeValue || undefined
                 })
             });
 
@@ -195,6 +210,17 @@
             const pct = ((diff / data.shortest.distance_m) * 100).toFixed(1);
             document.getElementById('extra-dist').textContent = `+${diff}m (+${pct}%)`;
             document.getElementById('pollution').textContent = `${data.pollution_value.toFixed(1)} ${data.pollution_unit}`;
+
+            // Calculate exposure difference
+            const exposureDiff = ((data.clean_air.exposure - data.shortest.exposure) / data.shortest.exposure) * 100;
+            const exposurePct = exposureDiff.toFixed(1);
+            const exposureElement = document.getElementById('exposure-diff');
+            exposureElement.textContent = `${exposurePct}%`;
+            if (exposureDiff < 0) {
+                exposureElement.style.color = 'green';
+            } else {
+                exposureElement.style.color = '';
+            }
 
             setStatus("Routes calculated! Blue = shortest, green dashed = clean air.");
 
