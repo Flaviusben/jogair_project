@@ -106,8 +106,6 @@
 </div>
 
 <script>
-    const API = "http://127.0.0.1:8000";
-
     // Set default time picker to current local date and time
     document.getElementById('time-picker').value = new Date().toISOString().slice(0, 16);
 
@@ -168,7 +166,7 @@
         }
 
         try {
-            const response = await fetch(`${API}/routes`, {
+            const response = await fetch("/routes", {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({
