@@ -1,4 +1,4 @@
-# JogAir 🏃‍♂️💨
+# JogAir (⌐■_■)
 **Smart jogging app add-on for healthier running in Danish Smart Cities.**
 
 ## Project Overview
